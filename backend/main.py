@@ -59,8 +59,11 @@ class SecurityMiddleware(BaseHTTPMiddleware):
     """安全中间件：限流 + Token 校验 + 安全头"""
 
     async def dispatch(self, request: Request, call_next):
-        # 跳过健康检查和文档页
-        if request.url.path in ("/", "/health", "/docs", "/openapi.json", "/redoc"):
+        # 跳过：健康检查、文档、静态资源、前端页面
+        path = request.url.path
+        if path in ("/", "/health", "/docs", "/openapi.json", "/redoc"):
+            return await call_next(request)
+        if path.startswith("/assets/") or path.endswith((".js", ".css", ".png", ".jpg", ".svg", ".ico", ".woff", ".woff2")):
             return await call_next(request)
 
         # 限流
@@ -136,18 +139,22 @@ async def health():
     return {"status": "ok"}
 
 
-@app.get("/{full_path:path}")
-async def serve_frontend(full_path: str, request: Request):
-    """非 API 路径返回前端 SPA"""
-    # API 路径不走这里
-    if full_path.startswith("api/") or full_path.startswith("docs") or full_path.startswith("openapi"):
-        raise HTTPException(status_code=404)
-
-    file_path = os.path.join(STATIC_DIR, full_path) if full_path else os.path.join(STATIC_DIR, "index.html")
-    if os.path.isfile(file_path):
-        return FileResponse(file_path)
-    # SPA 兜底
+@app.get("/")
+async def serve_index():
+    """首页"""
     return FileResponse(os.path.join(STATIC_DIR, "index.html"))
+
+
+# SPA 兜底：非 API 的 GET 请求返回 index.html（让 React Router 处理）
+@app.middleware("http")
+async def spa_fallback(request: Request, call_next):
+    response = await call_next(request)
+    if response.status_code == 404 and not request.url.path.startswith("/api/") and not request.url.path.startswith("/docs") and not request.url.path.startswith("/openapi"):
+        file_path = os.path.join(STATIC_DIR, request.url.path.lstrip("/"))
+        if os.path.isfile(file_path):
+            return FileResponse(file_path)
+        return FileResponse(os.path.join(STATIC_DIR, "index.html"))
+    return response
 
 
 if __name__ == "__main__":
