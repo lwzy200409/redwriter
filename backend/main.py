@@ -5,8 +5,11 @@ import logging
 from contextlib import asynccontextmanager
 from collections import defaultdict
 
+import os
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from config import settings
@@ -125,18 +128,26 @@ app.include_router(history_router)
 app.include_router(image_router)
 
 
-@app.get("/")
-async def root():
-    return {
-        "name": settings.APP_NAME,
-        "version": "1.1.0",
-        "docs": "/docs",
-    }
+STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
 
 
 @app.get("/health")
 async def health():
     return {"status": "ok"}
+
+
+@app.get("/{full_path:path}")
+async def serve_frontend(full_path: str, request: Request):
+    """非 API 路径返回前端 SPA"""
+    # API 路径不走这里
+    if full_path.startswith("api/") or full_path.startswith("docs") or full_path.startswith("openapi"):
+        raise HTTPException(status_code=404)
+
+    file_path = os.path.join(STATIC_DIR, full_path) if full_path else os.path.join(STATIC_DIR, "index.html")
+    if os.path.isfile(file_path):
+        return FileResponse(file_path)
+    # SPA 兜底
+    return FileResponse(os.path.join(STATIC_DIR, "index.html"))
 
 
 if __name__ == "__main__":
